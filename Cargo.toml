@@ -1,0 +1,11 @@
+[package]
+name = "minecraft_clone"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+bevy = "0.18.0"
+noise = "0.9.0"
+futures-lite = "2.3"
+strum = "0.26"
+strum_macros = "0.26"
