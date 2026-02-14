@@ -1,4 +1,4 @@
-use super::block::BlockTextureId;
+use super::world::block::BlockTextureId;
 use bevy::asset::RenderAssetUsages;
 use bevy::image::ImageSampler;
 use bevy::render::render_resource::{
@@ -13,12 +13,8 @@ pub const TILE_SIZE: u32 = 16;
 
 pub struct AtlasPlugin;
 
-impl Plugin for AtlasPlugin {
-    fn build(&self, app: &mut App) {
-        app.add_systems(Startup, setup_texture_loading)
-            .add_systems(Update, try_build_atlas);
-    }
-}
+#[derive(Resource)]
+pub struct ChunkMaterial(pub Handle<StandardMaterial>);
 
 #[derive(Debug)]
 pub struct TextureAtlas {
@@ -33,7 +29,13 @@ pub struct PendingBlockTextures(pub HashMap<BlockTextureId, Handle<Image>>);
 #[derive(Resource)]
 pub struct BlockAtlas {
     pub texture: TextureAtlas,
-    pub handle: Handle<Image>,
+}
+
+impl Plugin for AtlasPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(Startup, setup_texture_loading)
+            .add_systems(Update, try_build_atlas);
+    }
 }
 
 impl TextureAtlas {
@@ -75,6 +77,7 @@ pub fn setup_texture_loading(mut commands: Commands, asset_server: Res<AssetServ
 pub fn try_build_atlas(
     mut commands: Commands,
     mut images: ResMut<Assets<Image>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
     pending: Option<Res<PendingBlockTextures>>,
 ) {
     let pending = match pending {
@@ -110,8 +113,16 @@ pub fn try_build_atlas(
 
     commands.insert_resource(BlockAtlas {
         texture: texture_atlas,
-        handle: atlas_handle,
     });
+
+    let material = materials.add(StandardMaterial {
+        base_color_texture: Some(atlas_handle),
+        perceptual_roughness: 1.0,
+        metallic: 0.0,
+        ..default()
+    });
+
+    commands.insert_resource(ChunkMaterial(material));
 
     commands.remove_resource::<PendingBlockTextures>();
     println!("atlas built!");
@@ -135,7 +146,8 @@ fn build_atlas(
         let x = index % tiles_per_row;
         let y = index / tiles_per_row;
 
-        let src = images.get(&handles[&id]).unwrap();
+        let handle = &handles[&id];
+        let src = images.get(handle).unwrap();
         let src_data = src.data.as_ref().expect("Image has no CPU data");
 
         copy_tile(src_data, &mut atlas_data, x, y, tiles_per_row);

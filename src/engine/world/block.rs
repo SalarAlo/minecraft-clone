@@ -9,6 +9,9 @@ pub enum BlockType {
     Grass = 1,
     Dirt = 2,
     Sand = 3,
+    Bedrock = 4,
+    OakWood = 5,
+    OakLeaf = 6,
 }
 
 #[repr(u16)]
@@ -18,6 +21,10 @@ pub enum BlockTextureId {
     GrassTop = 1,
     Sand = 2,
     Dirt = 3,
+    Bedrock = 4,
+    OakWoodSide = 5,
+    OakWoodTop = 6,
+    OakLeaf = 7,
 }
 
 impl BlockTextureId {
@@ -32,6 +39,10 @@ impl BlockTextureId {
             BlockTextureId::GrassSide => "grass_block_side.png",
             BlockTextureId::Dirt => "dirt.png",
             BlockTextureId::Sand => "sand.png",
+            BlockTextureId::Bedrock => "bedrock.png",
+            BlockTextureId::OakLeaf => "pale_oak_leaves.png",
+            BlockTextureId::OakWoodSide => "oak_log.png",
+            BlockTextureId::OakWoodTop => "oak_log_top.png",
         }));
 
         path
@@ -42,6 +53,7 @@ impl BlockType {
     pub fn is_seethrough(&self) -> bool {
         match self {
             Self::Air => true,
+            Self::OakLeaf => true,
             _ => false,
         }
     }
@@ -56,7 +68,15 @@ impl BlockType {
                 _ => BlockTextureId::GrassSide,
             }),
 
+            BlockType::OakWood => Some(match face {
+                Direction::Top => BlockTextureId::OakWoodTop,
+                Direction::Bottom => BlockTextureId::OakWoodTop,
+                _ => BlockTextureId::OakWoodSide,
+            }),
+
+            BlockType::OakLeaf => Some(BlockTextureId::OakLeaf),
             BlockType::Dirt => Some(BlockTextureId::Dirt),
+            BlockType::Bedrock => Some(BlockTextureId::Bedrock),
             BlockType::Sand => Some(BlockTextureId::Sand),
         }
     }

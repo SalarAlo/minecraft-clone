@@ -3067,6 +3067,7 @@ dependencies = [
  "bevy",
  "futures-lite",
  "noise",
+ "once_cell",
  "strum",
  "strum_macros",
 ]

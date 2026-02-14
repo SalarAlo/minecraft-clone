@@ -55,7 +55,8 @@ pub struct CameraSettings {
 }
 
 fn spawn_camera(mut commands: Commands, config: Res<CameraConfig>) {
-    let transform = Transform::from_translation(config.starting_pos);
+    let transform = Transform::from_translation(config.starting_pos)
+        .looking_at(Vec3::new(50., 50., 50.), Vec3::Y);
 
     commands.spawn((
         Camera3d::default(),

@@ -1,24 +1,22 @@
 mod engine;
 
-use crate::engine::atlas::AtlasPlugin;
-use crate::engine::camera::CameraPlugin;
-use crate::engine::chunk::{CHUNK_HEIGHT, CHUNK_SIZE};
-use crate::engine::world::WorldPlugin;
 use bevy::prelude::*;
+
+use engine::atlas::AtlasPlugin;
+use engine::camera::CameraPlugin;
+use engine::world::generation::WorldGenerationPlugin;
+use engine::world::streaming::StreamingPlugin;
 
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
         .add_plugins(AtlasPlugin)
         .add_plugins(CameraPlugin {
-            starting_pos: Vec3::new(
-                CHUNK_SIZE as f32,
-                CHUNK_HEIGHT as f32 + 10.,
-                CHUNK_SIZE as f32,
-            ),
+            starting_pos: Vec3::new(0., 100., 0.),
             ..default()
         })
-        .add_plugins(WorldPlugin::default())
+        .add_plugins(WorldGenerationPlugin)
+        .add_plugins(StreamingPlugin { render_distance: 8 })
         .add_systems(Startup, spawn_light)
         .run();
 }
