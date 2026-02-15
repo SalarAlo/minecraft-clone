@@ -217,8 +217,6 @@ impl Chunk {
     }
 
     fn place_tree(&mut self, start_pos: IVec3, rng: &mut StdRng) {
-        println!("Placed a tree");
-
         const TREE_MIN_HEIGHT: i32 = 4;
         const TREE_MAX_HEIGHT: i32 = 6;
 

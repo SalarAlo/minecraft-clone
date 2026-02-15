@@ -3,6 +3,7 @@
 use crate::engine::atlas::BlockAtlas;
 use crate::engine::atlas::ChunkMaterial;
 use crate::engine::world::chunk::Chunk;
+use crate::engine::world::chunk_meshing::UnmeshedChunk;
 use bevy::{platform::collections::HashSet, prelude::*};
 
 use crate::engine::world::chunk::ChunkMap;
@@ -18,14 +19,14 @@ struct StreamingResource {
     render_distance: usize,
 }
 
-#[derive(Resource)]
-struct StreamingBudget {
-    spawns_per_frame: usize,
-    despawns_per_frame: usize,
+#[derive(Eq, PartialEq, Hash, Clone, Copy)]
+struct DesiredChunkEntry {
+    coord: IVec2,
+    should_be_meshed: bool,
 }
 
 #[derive(Resource, Default)]
-struct DesiredChunks(HashSet<IVec2>);
+struct DesiredChunks(HashSet<DesiredChunkEntry>);
 
 #[derive(Resource, Default, PartialEq, Eq, Clone, Copy)]
 struct PlayerChunkPositionTracker {
@@ -35,11 +36,16 @@ struct PlayerChunkPositionTracker {
 
 #[derive(Resource, Default)]
 struct SpawnQueue {
-    list: Vec<IVec2>,
+    list: Vec<DesiredChunkEntry>,
 }
 
 #[derive(Resource, Default)]
 struct DespawnQueue {
+    list: Vec<IVec2>,
+}
+
+#[derive(Resource, Default)]
+struct PromoteQueue {
     list: Vec<IVec2>,
 }
 
@@ -57,15 +63,11 @@ impl Plugin for StreamingPlugin {
             render_distance: self.render_distance,
         });
 
-        app.insert_resource(StreamingBudget {
-            spawns_per_frame: 32,
-            despawns_per_frame: 128,
-        });
-
         app.insert_resource(PlayerChunkPositionTracker::default());
         app.insert_resource(DesiredChunks::default());
 
         app.insert_resource(SpawnQueue::default());
+        app.insert_resource(PromoteQueue::default());
         app.insert_resource(DespawnQueue::default());
 
         app.add_systems(
@@ -75,6 +77,7 @@ impl Plugin for StreamingPlugin {
                 update_desired_chunk_set.run_if(resource_changed::<PlayerChunkPositionTracker>),
                 reconcile_chunks.run_if(resource_changed::<DesiredChunks>),
                 execute_spawns.run_if(resource_exists::<BlockAtlas>),
+                execute_promotions,
                 execute_despawns,
             )
                 .chain(),
@@ -117,9 +120,15 @@ fn update_desired_chunk_set(
     let side_len = (2 * r + 1) as usize;
     desired.reserve(side_len.pow(2));
 
-    for x in -r..=r {
-        for z in -r..=r {
-            desired.insert(center + IVec2::new(x, z));
+    let pr = r + 1;
+    for x in -pr..=pr {
+        for z in -pr..=pr {
+            let is_at_edge = x == pr || x == -pr || z == pr || z == -pr;
+
+            desired.insert(DesiredChunkEntry {
+                coord: center + IVec2::new(x, z),
+                should_be_meshed: !is_at_edge,
+            });
         }
     }
 }
@@ -129,22 +138,34 @@ fn reconcile_chunks(
     chunk_map: Res<ChunkMap>,
     mut spawn: ResMut<SpawnQueue>,
     mut despawn: ResMut<DespawnQueue>,
+    mut promote: ResMut<PromoteQueue>,
+    unmeshed: Query<(), With<UnmeshedChunk>>,
 ) {
-    let desired = &desired.0;
-
-    let chunk_map = &chunk_map.0;
-
     spawn.list.clear();
     despawn.list.clear();
+    promote.list.clear();
 
-    for coord in desired.iter() {
-        if !chunk_map.contains_key(coord) {
-            spawn.list.push(*coord);
+    let desired = &desired.0;
+    let chunk_map = &chunk_map.0;
+
+    let desired_coords: HashSet<_> = desired.iter().map(|e| e.coord).collect();
+
+    for entry in desired {
+        match chunk_map.get(&entry.coord) {
+            None => {
+                spawn.list.push(*entry);
+            }
+
+            Some(&entity) => {
+                if entry.should_be_meshed && unmeshed.contains(entity) {
+                    promote.list.push(entry.coord);
+                }
+            }
         }
     }
 
     for coord in chunk_map.keys() {
-        if !desired.contains(coord) {
+        if !desired_coords.contains(coord) {
             despawn.list.push(*coord);
         }
     }
@@ -154,18 +175,19 @@ fn execute_spawns(
     mut commands: Commands,
     mut spawn: ResMut<SpawnQueue>,
     mut map: ResMut<ChunkMap>,
-    budget: Res<StreamingBudget>,
     chunk_material: Res<ChunkMaterial>,
 ) {
-    let count = spawn.list.len().min(budget.spawns_per_frame);
+    let count = spawn.list.len();
 
     for _ in 0..count {
-        if let Some(coord) = spawn.list.pop() {
-            let entity = Chunk::new_entity(&mut commands, &chunk_material, coord);
+        if let Some(entry) = spawn.list.pop() {
+            let entity = Chunk::new_entity(&mut commands, &chunk_material, entry.coord);
 
-            map.0.insert(coord, entity);
+            if !entry.should_be_meshed {
+                commands.entity(entity).insert(UnmeshedChunk);
+            }
 
-            println!("Spawned chunk {:?}", coord);
+            map.0.insert(entry.coord, entity);
         }
     }
 }
@@ -174,15 +196,29 @@ fn execute_despawns(
     mut commands: Commands,
     mut despawn: ResMut<DespawnQueue>,
     mut map: ResMut<ChunkMap>,
-    budget: Res<StreamingBudget>,
 ) {
-    let count = despawn.list.len().min(budget.despawns_per_frame);
+    let count = despawn.list.len();
 
     for _ in 0..count {
         if let Some(coord) = despawn.list.pop() {
             if let Some(entity) = map.0.remove(&coord) {
                 commands.entity(entity).despawn();
-                println!("Despawned chunk {:?}", coord);
+            }
+        }
+    }
+}
+
+fn execute_promotions(
+    mut commands: Commands,
+    mut promote: ResMut<PromoteQueue>,
+    map: Res<ChunkMap>,
+) {
+    let count = promote.list.len();
+
+    for _ in 0..count {
+        if let Some(coord) = promote.list.pop() {
+            if let Some(&entity) = map.0.get(&coord) {
+                commands.entity(entity).remove::<UnmeshedChunk>();
             }
         }
     }

@@ -22,7 +22,7 @@ impl Default for CameraPlugin {
     fn default() -> Self {
         Self {
             sensitivity: 0.0005,
-            speed: 100.0,
+            speed: 200.0,
             shift_speed: 1000.0,
             lock_cursor_on_start: true,
             starting_pos: Vec3::ZERO,

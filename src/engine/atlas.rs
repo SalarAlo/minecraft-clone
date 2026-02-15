@@ -2,7 +2,7 @@ use super::world::block::BlockTextureId;
 use bevy::asset::RenderAssetUsages;
 use bevy::image::ImageSampler;
 use bevy::render::render_resource::{
-    Extent3d, FilterMode, SamplerDescriptor, TextureDimension, TextureFormat,
+    AddressMode, Extent3d, FilterMode, SamplerDescriptor, TextureDimension, TextureFormat,
 };
 
 use bevy::prelude::*;
@@ -96,12 +96,12 @@ pub fn try_build_atlas(
             mag_filter: FilterMode::Nearest,
             min_filter: FilterMode::Nearest,
             mipmap_filter: FilterMode::Nearest,
+            address_mode_u: AddressMode::ClampToEdge,
+            address_mode_v: AddressMode::ClampToEdge,
             ..default()
         }
         .into(),
     );
-
-    atlas_image.texture_descriptor.mip_level_count = 1;
 
     let atlas_handle = images.add(atlas_image);
 

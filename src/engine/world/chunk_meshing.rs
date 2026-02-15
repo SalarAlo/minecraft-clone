@@ -17,6 +17,12 @@ pub struct WorldBlockAccess<'w, 's> {
 
 pub struct ChunkMeshingPlugin;
 
+#[derive(Component)]
+pub struct UnmeshedChunk;
+
+#[derive(Resource, Default)]
+pub struct ChunkMeshingBudget(usize);
+
 impl BlockAccess for WorldBlockAccess<'_, '_> {
     fn get_block(&self, world: IVec3) -> Option<BlockType> {
         let chunk_coord = IVec2::new(
@@ -40,6 +46,7 @@ impl BlockAccess for WorldBlockAccess<'_, '_> {
 impl Plugin for ChunkMeshingPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ChunkMap>();
+        app.insert_resource(ChunkMeshingBudget(64));
 
         app.add_systems(Update, mesh_chunks.run_if(resource_exists::<BlockAtlas>));
     }
@@ -50,15 +57,14 @@ fn mesh_chunks(
     access: WorldBlockAccess,
     atlas: Res<BlockAtlas>,
     mut mesh_assets: ResMut<Assets<Mesh>>,
-    query: Query<(Entity, &Chunk), Without<Mesh3d>>,
+    query: Query<(Entity, &Chunk), (Without<Mesh3d>, Without<UnmeshedChunk>)>,
+    budget: Res<ChunkMeshingBudget>,
 ) {
-    for (entity, chunk) in &query {
+    for (entity, chunk) in query.iter().take(budget.0) {
         let mesh = chunk.build_chunk_mesh(&access, &atlas.texture);
 
         commands
             .entity(entity)
             .insert(Mesh3d(mesh_assets.add(mesh)));
-
-        println!("Meshed chunk at ({}, {})", chunk.x(), chunk.z());
     }
 }
