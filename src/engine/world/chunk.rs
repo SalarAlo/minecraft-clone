@@ -1,24 +1,39 @@
+// understood
+
 use bevy::platform::collections::HashMap;
 use bevy::prelude::*;
 use noise::{Fbm, MultiFractal, NoiseFn, Perlin};
 use once_cell::sync::Lazy;
+use rand::rngs::StdRng;
+use rand::{RngExt, SeedableRng};
 
 use super::block::{BlockAccess, BlockType};
-use crate::engine::atlas::TextureAtlas;
-use crate::engine::{cube::DIRECTIONS, mesh_builder::MeshBuilder};
+use crate::engine::atlas::{ChunkMaterial, TextureAtlas};
+use crate::engine::{face_direction::DIRECTIONS, mesh_builder::MeshBuilder};
 
-pub const CHUNK_HEIGHT: usize = 32;
-pub const CHUNK_SIZE: usize = 32;
+pub const CHUNK_HEIGHT: usize = 128;
+const HALF_CHUNK_HEIGHT: usize = CHUNK_HEIGHT / 2;
+pub const WATER_HEIGHT: usize = HALF_CHUNK_HEIGHT + 20;
+pub const SAND_HEIGHT: usize = HALF_CHUNK_HEIGHT + 22;
+pub const CHUNK_SIZE: usize = 16;
 const CHUNK_VOLUME: usize = CHUNK_SIZE * CHUNK_SIZE * CHUNK_HEIGHT;
 
-const PAD_SIZE: usize = CHUNK_SIZE + 2;
-const PAD_HEIGHT: usize = CHUNK_HEIGHT + 2;
-const PAD_VOLUME: usize = PAD_SIZE * PAD_SIZE * PAD_HEIGHT;
+// 2 are added because -> neighbour chunk_data neighbour
+const PAD_CHUNK_SIZE: usize = CHUNK_SIZE + 2;
+
+//                        neighbour
+// 2 are added because -> chunk_data
+//                        neighbour
+const PAD_CHUNK_HEIGHT: usize = CHUNK_HEIGHT + 2;
+
+const PAD_CHUNK_VOLUME: usize = PAD_CHUNK_SIZE * PAD_CHUNK_SIZE * PAD_CHUNK_HEIGHT;
+
+const SEED: u32 = 42;
 
 static FBM: Lazy<Fbm<Perlin>> = Lazy::new(|| {
-    Fbm::<Perlin>::new(42)
+    Fbm::<Perlin>::new(SEED)
         .set_frequency(0.5)
-        .set_octaves(3)
+        .set_octaves(2)
         .set_lacunarity(2.0)
         .set_persistence(0.5)
 });
@@ -30,9 +45,7 @@ pub struct Chunk {
 }
 
 #[derive(Resource, Default)]
-pub struct ChunkMap {
-    pub map: HashMap<IVec2, Entity>,
-}
+pub struct ChunkMap(pub HashMap<IVec2, Entity>);
 
 impl Chunk {
     pub fn x(&self) -> i32 {
@@ -43,82 +56,91 @@ impl Chunk {
         self.coord.y
     }
 
-    pub fn build_chunk_mesh(&self, blocks: &impl BlockAccess, atlas: &TextureAtlas) -> Mesh {
+    pub fn build_chunk_mesh(&self, block_access: &impl BlockAccess, atlas: &TextureAtlas) -> Mesh {
         let mut mesh_builder = MeshBuilder::with_capacity_faces(CHUNK_VOLUME * 2);
         let origin = self.chunk_origin();
 
-        let mut solid = [false; CHUNK_VOLUME];
+        let mut is_solid = [false; CHUNK_VOLUME];
         for i in 0..CHUNK_VOLUME {
-            solid[i] = !self.blocks[i].is_seethrough();
+            is_solid[i] = !self.blocks[i].is_seethrough();
         }
 
-        let mut padded = [false; PAD_VOLUME];
+        let mut is_solid_padded = [false; PAD_CHUNK_VOLUME];
 
         for y in 0..CHUNK_HEIGHT as i32 {
             for z in 0..CHUNK_SIZE as i32 {
                 for x in 0..CHUNK_SIZE as i32 {
-                    let src = to_index(IVec3::new(x, y, z));
+                    let src = Self::to_index(IVec3::new(x, y, z));
                     let dst = Self::pad_index(x + 1, y + 1, z + 1);
-                    padded[dst] = solid[src];
+                    is_solid_padded[dst] = is_solid[src];
                 }
             }
         }
 
-        for y in 0..CHUNK_HEIGHT as i32 {
+        // padding for x dimension
+        for by in 0..CHUNK_HEIGHT as i32 {
             for z in 0..CHUNK_SIZE as i32 {
-                padded[Self::pad_index(0, y + 1, z + 1)] = blocks
-                    .get_block(origin + IVec3::new(-1, y, z))
+                is_solid_padded[Self::pad_index(0, by + 1, z + 1)] = block_access
+                    .get_block(origin + IVec3::new(-1, by, z))
                     .map_or(false, |b| !b.is_seethrough());
 
-                padded[Self::pad_index(CHUNK_SIZE as i32 + 1, y + 1, z + 1)] = blocks
-                    .get_block(origin + IVec3::new(CHUNK_SIZE as i32, y, z))
-                    .map_or(false, |b| !b.is_seethrough());
+                is_solid_padded[Self::pad_index(CHUNK_SIZE as i32 + 1, by + 1, z + 1)] =
+                    block_access
+                        .get_block(origin + IVec3::new(CHUNK_SIZE as i32, by, z))
+                        .map_or(false, |b| !b.is_seethrough());
             }
         }
 
-        for y in 0..CHUNK_HEIGHT as i32 {
-            for x in 0..CHUNK_SIZE as i32 {
-                padded[Self::pad_index(x + 1, y + 1, 0)] = blocks
-                    .get_block(origin + IVec3::new(x, y, -1))
+        // padding for z dimension
+        for by in 0..CHUNK_HEIGHT as i32 {
+            for bx in 0..CHUNK_SIZE as i32 {
+                is_solid_padded[Self::pad_index(bx + 1, by + 1, 0)] = block_access
+                    .get_block(origin + IVec3::new(bx, by, -1))
                     .map_or(false, |b| !b.is_seethrough());
 
-                padded[Self::pad_index(x + 1, y + 1, CHUNK_SIZE as i32 + 1)] = blocks
-                    .get_block(origin + IVec3::new(x, y, CHUNK_SIZE as i32))
-                    .map_or(false, |b| !b.is_seethrough());
+                is_solid_padded[Self::pad_index(bx + 1, by + 1, CHUNK_SIZE as i32 + 1)] =
+                    block_access
+                        .get_block(origin + IVec3::new(bx, by, CHUNK_SIZE as i32))
+                        .map_or(false, |b| !b.is_seethrough());
             }
         }
 
-        for z in 0..CHUNK_SIZE as i32 {
-            for x in 0..CHUNK_SIZE as i32 {
-                padded[Self::pad_index(x + 1, 0, z + 1)] = blocks
-                    .get_block(origin + IVec3::new(x, -1, z))
+        // padding for y dimension
+        for bz in 0..CHUNK_SIZE as i32 {
+            for bx in 0..CHUNK_SIZE as i32 {
+                is_solid_padded[Self::pad_index(bx + 1, 0, bz + 1)] = block_access
+                    .get_block(origin + IVec3::new(bx, -1, bz))
                     .map_or(false, |b| !b.is_seethrough());
 
-                padded[Self::pad_index(x + 1, CHUNK_HEIGHT as i32 + 1, z + 1)] = blocks
-                    .get_block(origin + IVec3::new(x, CHUNK_HEIGHT as i32, z))
-                    .map_or(false, |b| !b.is_seethrough());
+                is_solid_padded[Self::pad_index(bx + 1, CHUNK_HEIGHT as i32 + 1, bz + 1)] =
+                    block_access
+                        .get_block(origin + IVec3::new(bx, CHUNK_HEIGHT as i32, bz))
+                        .map_or(false, |b| !b.is_seethrough());
             }
         }
 
-        for y in 1..=CHUNK_HEIGHT as i32 {
-            for z in 1..=CHUNK_SIZE as i32 {
-                for x in 1..=CHUNK_SIZE as i32 {
-                    let idx = Self::pad_index(x, y, z);
-                    if !padded[idx] {
+        for py in 1..=CHUNK_HEIGHT as i32 {
+            for pz in 1..=CHUNK_SIZE as i32 {
+                for px in 1..=CHUNK_SIZE as i32 {
+                    let idx = Self::pad_index(px, py, pz);
+
+                    if !is_solid_padded[idx] {
                         continue;
                     }
 
-                    let bx = x - 1;
-                    let by = y - 1;
-                    let bz = z - 1;
+                    // the actual non padded block position
+                    let bx = px - 1;
+                    let by = py - 1;
+                    let bz = pz - 1;
 
                     let block_type = self.blocks[by as usize
                         + bz as usize * CHUNK_HEIGHT
                         + bx as usize * CHUNK_HEIGHT * CHUNK_SIZE];
 
                     for dir in DIRECTIONS {
-                        let n = dir.normal();
-                        let neighbour_solid = padded[Self::pad_index(x + n.x, y + n.y, z + n.z)];
+                        let dir_vec3 = dir.normal();
+                        let neighbour_solid = is_solid_padded
+                            [Self::pad_index(px + dir_vec3.x, py + dir_vec3.y, pz + dir_vec3.z)];
 
                         if !neighbour_solid {
                             if let Some(texture_id) = block_type.texture_id(dir) {
@@ -135,8 +157,13 @@ impl Chunk {
     }
 
     pub fn new(chunk_x: i32, chunk_z: i32) -> Chunk {
-        let mut blocks = [BlockType::Air; CHUNK_VOLUME];
+        let mut rng: StdRng = StdRng::seed_from_u64(SEED as u64);
         let scale = 0.02;
+
+        let mut chunk = Chunk {
+            coord: IVec2::new(chunk_x, chunk_z),
+            blocks: [BlockType::Air; CHUNK_VOLUME],
+        };
 
         for block_x in 0..CHUNK_SIZE as i32 {
             for block_z in 0..CHUNK_SIZE as i32 {
@@ -144,34 +171,114 @@ impl Chunk {
                 let world_z = (block_z + chunk_z * CHUNK_SIZE as i32) as f64 * scale;
 
                 let height = FBM.get([world_x, world_z]);
-                let height = ((height + 1.0) * 0.5 * CHUNK_HEIGHT as f64) as usize;
+                let height = ((HALF_CHUNK_HEIGHT as f64)
+                    + ((height + 1.0) * 0.5 * (HALF_CHUNK_HEIGHT as f64)))
+                    as usize;
                 let height = height.clamp(0, CHUNK_HEIGHT - 1) as i32;
 
-                for y in 0..height {
+                for y in 0..height.max(WATER_HEIGHT as i32) {
                     let block = if y == 0 {
                         BlockType::Bedrock
-                    } else if y < CHUNK_HEIGHT as i32 / 2 {
+                    } else if y < WATER_HEIGHT as i32 {
+                        BlockType::Water
+                    } else if y < SAND_HEIGHT as i32 + rng.random_range(-1..=0) {
                         BlockType::Sand
                     } else if y < height - 1 {
                         BlockType::Dirt
                     } else {
+                        if rng.random::<f32>() < 0.005 {
+                            chunk.place_tree(IVec3::new(block_x, height, block_z), &mut rng);
+                        }
+
                         BlockType::Grass
                     };
 
-                    blocks[to_index(IVec3::new(block_x, y, block_z))] = block;
+                    chunk.blocks[Self::to_index(IVec3::new(block_x, y, block_z))] = block;
                 }
             }
         }
 
-        Chunk {
-            coord: IVec2::new(chunk_x, chunk_z),
-            blocks,
+        chunk
+    }
+
+    pub fn new_entity(commands: &mut Commands, material: &ChunkMaterial, coord: IVec2) -> Entity {
+        let chunk = Chunk::new(coord.x, coord.y);
+
+        let world_x = coord.x * CHUNK_SIZE as i32;
+        let world_z = coord.y * CHUNK_SIZE as i32;
+
+        commands
+            .spawn((
+                chunk,
+                MeshMaterial3d(material.0.clone()),
+                Transform::from_xyz(world_x as f32, 0.0, world_z as f32),
+            ))
+            .id()
+    }
+
+    fn place_tree(&mut self, start_pos: IVec3, rng: &mut StdRng) {
+        println!("Placed a tree");
+
+        const TREE_MIN_HEIGHT: i32 = 4;
+        const TREE_MAX_HEIGHT: i32 = 6;
+
+        let tree_height: i32 = rng.random_range(TREE_MIN_HEIGHT..=TREE_MAX_HEIGHT);
+
+        for y in 0..tree_height {
+            self.blocks[Self::to_index(start_pos + IVec3::new(0, y, 0))] = BlockType::OakWood;
+        }
+        let top = start_pos.y + tree_height;
+
+        // Bottom leaf layer (largest)
+        for x in -2..=2 {
+            for z in -2..=2 {
+                for y in -1..=0 {
+                    let pos = IVec3::new(start_pos.x + x, top + y, start_pos.z + z);
+
+                    if self.get_local(pos).is_none() {
+                        continue;
+                    }
+
+                    // Skip corners to avoid cube look
+                    if x.abs() == 2 && z.abs() == 2 {
+                        continue;
+                    }
+
+                    self.blocks[Self::to_index(pos)] = BlockType::OakLeaf;
+                }
+            }
+        }
+
+        // Middle layer
+        for x in -1..=1 {
+            for z in -1..=1 {
+                let pos = IVec3::new(start_pos.x + x, top + 1, start_pos.z + z);
+
+                if self.get_local(pos).is_none() {
+                    continue;
+                }
+
+                self.blocks[Self::to_index(pos)] = BlockType::OakLeaf;
+            }
+        }
+
+        // Top
+        let pos = IVec3::new(start_pos.x, top + 2, start_pos.z);
+        if self.get_local(pos).is_some() {
+            self.blocks[Self::to_index(pos)] = BlockType::OakLeaf;
         }
     }
 
     #[inline(always)]
     fn pad_index(x: i32, y: i32, z: i32) -> usize {
-        (x as usize) + (z as usize) * PAD_SIZE + (y as usize) * PAD_SIZE * PAD_SIZE
+        (x as usize)
+            + (z as usize) * PAD_CHUNK_SIZE
+            + (y as usize) * PAD_CHUNK_SIZE * PAD_CHUNK_SIZE
+    }
+
+    #[inline(always)]
+    fn to_index(v: IVec3) -> usize {
+        v.y as usize + v.z as usize * CHUNK_HEIGHT + v.x as usize * CHUNK_HEIGHT * CHUNK_SIZE
     }
 
     pub fn get_local(&self, local: IVec3) -> Option<BlockType> {
@@ -184,7 +291,7 @@ impl Chunk {
         {
             return None;
         }
-        Some(self.blocks[to_index(local)])
+        Some(self.blocks[Self::to_index(local)])
     }
 
     pub fn chunk_origin(&self) -> IVec3 {
@@ -194,9 +301,4 @@ impl Chunk {
             self.coord.y * CHUNK_SIZE as i32,
         )
     }
-}
-
-#[inline(always)]
-fn to_index(v: IVec3) -> usize {
-    v.y as usize + v.z as usize * CHUNK_HEIGHT + v.x as usize * CHUNK_HEIGHT * CHUNK_SIZE
 }

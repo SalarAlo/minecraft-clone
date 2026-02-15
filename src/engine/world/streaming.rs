@@ -1,6 +1,8 @@
+// understood
+
 use crate::engine::atlas::BlockAtlas;
 use crate::engine::atlas::ChunkMaterial;
-use crate::engine::world::generation::spawn_chunk_entity;
+use crate::engine::world::chunk::Chunk;
 use bevy::{platform::collections::HashSet, prelude::*};
 
 use crate::engine::world::chunk::ChunkMap;
@@ -23,12 +25,10 @@ struct StreamingBudget {
 }
 
 #[derive(Resource, Default)]
-struct DesiredChunks {
-    set: HashSet<IVec2>,
-}
+struct DesiredChunks(HashSet<IVec2>);
 
 #[derive(Resource, Default, PartialEq, Eq, Clone, Copy)]
-struct PlayerChunk {
+struct PlayerChunkPositionTracker {
     current: IVec2,
     previous: IVec2,
 }
@@ -45,7 +45,9 @@ struct DespawnQueue {
 
 impl Default for StreamingPlugin {
     fn default() -> Self {
-        Self { render_distance: 8 }
+        Self {
+            render_distance: 12,
+        }
     }
 }
 
@@ -56,11 +58,11 @@ impl Plugin for StreamingPlugin {
         });
 
         app.insert_resource(StreamingBudget {
-            spawns_per_frame: 3,
-            despawns_per_frame: 4,
+            spawns_per_frame: 32,
+            despawns_per_frame: 128,
         });
 
-        app.insert_resource(PlayerChunk::default());
+        app.insert_resource(PlayerChunkPositionTracker::default());
         app.insert_resource(DesiredChunks::default());
 
         app.insert_resource(SpawnQueue::default());
@@ -70,7 +72,7 @@ impl Plugin for StreamingPlugin {
             Update,
             (
                 detect_player_chunk,
-                rebuild_desired_chunks.run_if(resource_changed::<PlayerChunk>),
+                update_desired_chunk_set.run_if(resource_changed::<PlayerChunkPositionTracker>),
                 reconcile_chunks.run_if(resource_changed::<DesiredChunks>),
                 execute_spawns.run_if(resource_exists::<BlockAtlas>),
                 execute_despawns,
@@ -81,7 +83,7 @@ impl Plugin for StreamingPlugin {
 }
 
 fn detect_player_chunk(
-    mut chunk_state: ResMut<PlayerChunk>,
+    mut chunk_state: ResMut<PlayerChunkPositionTracker>,
     transform: Single<&Transform, With<Camera>>,
 ) {
     let world_pos = transform.translation;
@@ -97,45 +99,52 @@ fn detect_player_chunk(
     }
 }
 
-fn rebuild_desired_chunks(
-    player: Res<PlayerChunk>,
+fn update_desired_chunk_set(
+    player: Res<PlayerChunkPositionTracker>,
     settings: Res<StreamingResource>,
     mut desired: ResMut<DesiredChunks>,
 ) {
+    let desired = &mut desired.0;
     let center = player.current;
     let r = settings.render_distance as i32;
 
-    if player.current == player.previous && !desired.set.is_empty() {
+    let player_stayed_still = player.current == player.previous;
+    if player_stayed_still && !desired.is_empty() {
         return;
     }
 
-    desired.set.clear();
-    desired.set.reserve(((2 * r + 1) * (2 * r + 1)) as usize);
+    desired.clear();
+    let side_len = (2 * r + 1) as usize;
+    desired.reserve(side_len.pow(2));
 
     for x in -r..=r {
         for z in -r..=r {
-            desired.set.insert(center + IVec2::new(x, z));
+            desired.insert(center + IVec2::new(x, z));
         }
     }
 }
 
 fn reconcile_chunks(
     desired: Res<DesiredChunks>,
-    map: Res<ChunkMap>,
+    chunk_map: Res<ChunkMap>,
     mut spawn: ResMut<SpawnQueue>,
     mut despawn: ResMut<DespawnQueue>,
 ) {
+    let desired = &desired.0;
+
+    let chunk_map = &chunk_map.0;
+
     spawn.list.clear();
     despawn.list.clear();
 
-    for coord in desired.set.iter() {
-        if !map.map.contains_key(coord) {
+    for coord in desired.iter() {
+        if !chunk_map.contains_key(coord) {
             spawn.list.push(*coord);
         }
     }
 
-    for coord in map.map.keys() {
-        if !desired.set.contains(coord) {
+    for coord in chunk_map.keys() {
+        if !desired.contains(coord) {
             despawn.list.push(*coord);
         }
     }
@@ -152,9 +161,9 @@ fn execute_spawns(
 
     for _ in 0..count {
         if let Some(coord) = spawn.list.pop() {
-            let (entity, _) = spawn_chunk_entity(&mut commands, &chunk_material, coord);
+            let entity = Chunk::new_entity(&mut commands, &chunk_material, coord);
 
-            map.map.insert(coord, entity);
+            map.0.insert(coord, entity);
 
             println!("Spawned chunk {:?}", coord);
         }
@@ -171,7 +180,7 @@ fn execute_despawns(
 
     for _ in 0..count {
         if let Some(coord) = despawn.list.pop() {
-            if let Some(entity) = map.map.remove(&coord) {
+            if let Some(entity) = map.0.remove(&coord) {
                 commands.entity(entity).despawn();
                 println!("Despawned chunk {:?}", coord);
             }

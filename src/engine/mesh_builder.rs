@@ -3,7 +3,46 @@ use bevy::mesh::Indices;
 use bevy::prelude::*;
 use bevy::render::render_resource::PrimitiveTopology;
 
-use super::cube::Direction;
+use crate::engine::face_direction::{FACE_NORMALS, FACE_VERTICES};
+
+use super::face_direction::FaceDirection;
+
+// Assumes Direction is a simple 0..=5 repr (as in your code).
+// If it's not, add an explicit mapping function.
+
+#[derive(Clone, Copy)]
+struct FaceLut {
+    verts: [[f32; 3]; 4],
+    normal: [f32; 3],
+}
+
+// Build a single LUT to avoid multiple array lookups and bounds checks in hot code.
+const FACE_LUT: [FaceLut; 6] = [
+    FaceLut {
+        verts: FACE_VERTICES[0],
+        normal: FACE_NORMALS[0],
+    },
+    FaceLut {
+        verts: FACE_VERTICES[1],
+        normal: FACE_NORMALS[1],
+    },
+    FaceLut {
+        verts: FACE_VERTICES[2],
+        normal: FACE_NORMALS[2],
+    },
+    FaceLut {
+        verts: FACE_VERTICES[3],
+        normal: FACE_NORMALS[3],
+    },
+    FaceLut {
+        verts: FACE_VERTICES[4],
+        normal: FACE_NORMALS[4],
+    },
+    FaceLut {
+        verts: FACE_VERTICES[5],
+        normal: FACE_NORMALS[5],
+    },
+];
 
 #[derive(Default)]
 pub struct MeshBuilder {
@@ -14,11 +53,6 @@ pub struct MeshBuilder {
 }
 
 impl MeshBuilder {
-    #[inline]
-    pub fn new() -> Self {
-        Self::default()
-    }
-
     #[inline]
     pub fn with_capacity_faces(face_count: usize) -> Self {
         let v = face_count * 4;
@@ -31,47 +65,62 @@ impl MeshBuilder {
         }
     }
 
-    #[inline]
-    pub fn reserve_faces(&mut self, additional_faces: usize) {
-        let v = additional_faces * 4;
-        let i = additional_faces * 6;
-        self.positions.reserve(v);
-        self.normals.reserve(v);
-        self.uvs.reserve(v);
-        self.indices.reserve(i);
-    }
-
-    #[inline]
-    pub fn add_face(&mut self, direction: Direction, pos: IVec3, face_uvs: [Vec2; 4]) {
+    #[inline(always)]
+    pub fn add_face(&mut self, dir: FaceDirection, pos: IVec3, face_uvs: [[f32; 2]; 4]) {
         let base = self.positions.len() as u32;
 
         let px = pos.x as f32;
         let py = pos.y as f32;
         let pz = pos.z as f32;
 
-        let n = direction.normal();
-        let normal = [n.x as f32, n.y as f32, n.z as f32];
+        let face = unsafe { FACE_LUT.get_unchecked(dir as usize) };
+        let v = &face.verts;
+        let n = face.normal;
 
-        let vs = direction.vertices();
+        self.positions.reserve(4);
+        self.normals.reserve(4);
+        self.uvs.reserve(4);
+        self.indices.reserve(6);
 
-        self.positions.extend([
-            [vs[0].x + px, vs[0].y + py, vs[0].z + pz],
-            [vs[1].x + px, vs[1].y + py, vs[1].z + pz],
-            [vs[2].x + px, vs[2].y + py, vs[2].z + pz],
-            [vs[3].x + px, vs[3].y + py, vs[3].z + pz],
-        ]);
+        unsafe {
+            // ---- positions (write 4) ----
+            let p_len = self.positions.len();
+            let p_ptr = self.positions.as_mut_ptr().add(p_len);
+            self.positions.set_len(p_len + 4);
+            *p_ptr.add(0) = [v[0][0] + px, v[0][1] + py, v[0][2] + pz];
+            *p_ptr.add(1) = [v[1][0] + px, v[1][1] + py, v[1][2] + pz];
+            *p_ptr.add(2) = [v[2][0] + px, v[2][1] + py, v[2][2] + pz];
+            *p_ptr.add(3) = [v[3][0] + px, v[3][1] + py, v[3][2] + pz];
 
-        self.normals.extend([normal; 4]);
+            // ---- normals (write 4) ----
+            let n_len = self.normals.len();
+            let n_ptr = self.normals.as_mut_ptr().add(n_len);
+            self.normals.set_len(n_len + 4);
+            *n_ptr.add(0) = n;
+            *n_ptr.add(1) = n;
+            *n_ptr.add(2) = n;
+            *n_ptr.add(3) = n;
 
-        self.uvs.extend([
-            [face_uvs[0].x, face_uvs[0].y],
-            [face_uvs[1].x, face_uvs[1].y],
-            [face_uvs[2].x, face_uvs[2].y],
-            [face_uvs[3].x, face_uvs[3].y],
-        ]);
+            // ---- uvs (write 4) ----
+            let uv_len = self.uvs.len();
+            let uv_ptr = self.uvs.as_mut_ptr().add(uv_len);
+            self.uvs.set_len(uv_len + 4);
+            *uv_ptr.add(0) = face_uvs[0];
+            *uv_ptr.add(1) = face_uvs[1];
+            *uv_ptr.add(2) = face_uvs[2];
+            *uv_ptr.add(3) = face_uvs[3];
 
-        self.indices
-            .extend([base, base + 1, base + 2, base, base + 2, base + 3]);
+            // ---- indices (write 6) ----
+            let i_len = self.indices.len();
+            let i_ptr = self.indices.as_mut_ptr().add(i_len);
+            self.indices.set_len(i_len + 6);
+            *i_ptr.add(0) = base;
+            *i_ptr.add(1) = base + 1;
+            *i_ptr.add(2) = base + 2;
+            *i_ptr.add(3) = base;
+            *i_ptr.add(4) = base + 2;
+            *i_ptr.add(5) = base + 3;
+        }
     }
 
     #[inline]

@@ -3,9 +3,24 @@ name = "minecraft_clone"
 version = "0.1.0"
 edition = "2024"
 
+[profile.release]
+# -- for fast final exec --
+# lto = "fat"
+# codegen-units = 1
+# panic = "abort"
+# strip = true
+
+# -- for fast compile times --
+lto = "off"
+codegen-units = 16
+
+[profile.release.package."*"]
+opt-level = 3
+
 [dependencies]
 bevy = "0.18.0"
 noise = "0.9.0"
+rand = "0.10.0"
 futures-lite = "2.3"
 strum = "0.26"
 strum_macros = "0.26"

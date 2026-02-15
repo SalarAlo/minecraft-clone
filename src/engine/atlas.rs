@@ -39,7 +39,7 @@ impl Plugin for AtlasPlugin {
 }
 
 impl TextureAtlas {
-    pub fn uvs(&self, id: BlockTextureId) -> [Vec2; 4] {
+    pub fn uvs(&self, id: BlockTextureId) -> [[f32; 2]; 4] {
         let index = self.indices[&id];
 
         let x = index % self.tiles_per_row;
@@ -54,10 +54,10 @@ impl TextureAtlas {
         let v_max = v_min + s;
 
         [
-            Vec2::new(u_max, v_max),
-            Vec2::new(u_min, v_max),
-            Vec2::new(u_min, v_min),
-            Vec2::new(u_max, v_min),
+            [u_max, v_max],
+            [u_min, v_max],
+            [u_min, v_min],
+            [u_max, v_min],
         ]
     }
 }

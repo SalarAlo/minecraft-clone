@@ -1,4 +1,6 @@
-use crate::engine::cube::Direction;
+// understood
+
+use crate::engine::face_direction::FaceDirection;
 use bevy::math::IVec3;
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
@@ -12,6 +14,9 @@ pub enum BlockType {
     Bedrock = 4,
     OakWood = 5,
     OakLeaf = 6,
+    Water = 7,
+    Stone = 8,
+    Snow = 9,
 }
 
 #[repr(u16)]
@@ -25,6 +30,9 @@ pub enum BlockTextureId {
     OakWoodSide = 5,
     OakWoodTop = 6,
     OakLeaf = 7,
+    Water = 8,
+    Stone = 9,
+    Snow = 10,
 }
 
 impl BlockTextureId {
@@ -33,8 +41,9 @@ impl BlockTextureId {
     }
 
     pub fn path(&self) -> String {
-        let mut path = String::from("minecraft_assets/textures/block/");
-        path.push_str(&String::from(match self {
+        let path = String::from("minecraft_assets/textures/block");
+
+        let specific = String::from(match self {
             BlockTextureId::GrassTop => "grass_block_top.png",
             BlockTextureId::GrassSide => "grass_block_side.png",
             BlockTextureId::Dirt => "dirt.png",
@@ -43,9 +52,12 @@ impl BlockTextureId {
             BlockTextureId::OakLeaf => "pale_oak_leaves.png",
             BlockTextureId::OakWoodSide => "oak_log.png",
             BlockTextureId::OakWoodTop => "oak_log_top.png",
-        }));
+            BlockTextureId::Water => "water.png",
+            BlockTextureId::Snow => "stone.png",
+            BlockTextureId::Stone => "snow.png",
+        });
 
-        path
+        format!("{path}/{specific}")
     }
 }
 
@@ -53,24 +65,23 @@ impl BlockType {
     pub fn is_seethrough(&self) -> bool {
         match self {
             Self::Air => true,
-            Self::OakLeaf => true,
             _ => false,
         }
     }
 
-    pub fn texture_id(&self, face: Direction) -> Option<BlockTextureId> {
+    pub fn texture_id(&self, face: FaceDirection) -> Option<BlockTextureId> {
         match self {
             BlockType::Air => None,
 
             BlockType::Grass => Some(match face {
-                Direction::Top => BlockTextureId::GrassTop,
-                Direction::Bottom => BlockTextureId::Dirt,
+                FaceDirection::Top => BlockTextureId::GrassTop,
+                FaceDirection::Bottom => BlockTextureId::Dirt,
                 _ => BlockTextureId::GrassSide,
             }),
 
             BlockType::OakWood => Some(match face {
-                Direction::Top => BlockTextureId::OakWoodTop,
-                Direction::Bottom => BlockTextureId::OakWoodTop,
+                FaceDirection::Top => BlockTextureId::OakWoodTop,
+                FaceDirection::Bottom => BlockTextureId::OakWoodTop,
                 _ => BlockTextureId::OakWoodSide,
             }),
 
@@ -78,6 +89,9 @@ impl BlockType {
             BlockType::Dirt => Some(BlockTextureId::Dirt),
             BlockType::Bedrock => Some(BlockTextureId::Bedrock),
             BlockType::Sand => Some(BlockTextureId::Sand),
+            BlockType::Water => Some(BlockTextureId::Water),
+            BlockType::Stone => Some(BlockTextureId::Stone),
+            BlockType::Snow => Some(BlockTextureId::Snow),
         }
     }
 }

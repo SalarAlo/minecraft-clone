@@ -1,3 +1,5 @@
+// understood
+
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 
@@ -5,17 +7,15 @@ use super::block::*;
 use super::chunk::CHUNK_SIZE;
 use super::chunk::*;
 use crate::engine::atlas::BlockAtlas;
-use crate::engine::atlas::ChunkMaterial;
 
+// reusable access pattern for ecs bevy data
 #[derive(SystemParam)]
 pub struct WorldBlockAccess<'w, 's> {
     chunks: Query<'w, 's, &'static Chunk>,
     map: Res<'w, ChunkMap>,
 }
 
-pub struct WorldGenerationPlugin;
-
-impl WorldGenerationPlugin {}
+pub struct ChunkMeshingPlugin;
 
 impl BlockAccess for WorldBlockAccess<'_, '_> {
     fn get_block(&self, world: IVec3) -> Option<BlockType> {
@@ -30,40 +30,19 @@ impl BlockAccess for WorldBlockAccess<'_, '_> {
             world.z.rem_euclid(CHUNK_SIZE as i32),
         );
 
-        let entity = self.map.map.get(&chunk_coord)?;
+        let entity = self.map.0.get(&chunk_coord)?;
         let chunk = self.chunks.get(*entity).ok()?;
 
         chunk.get_local(local)
     }
 }
 
-impl Plugin for WorldGenerationPlugin {
+impl Plugin for ChunkMeshingPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ChunkMap>();
 
         app.add_systems(Update, mesh_chunks.run_if(resource_exists::<BlockAtlas>));
     }
-}
-
-pub fn spawn_chunk_entity(
-    commands: &mut Commands,
-    material: &ChunkMaterial,
-    coord: IVec2,
-) -> (Entity, Chunk) {
-    let chunk = Chunk::new(coord.x, coord.y);
-
-    let world_x = coord.x * CHUNK_SIZE as i32;
-    let world_z = coord.y * CHUNK_SIZE as i32;
-
-    let entity = commands
-        .spawn((
-            chunk.clone(),
-            MeshMaterial3d(material.0.clone()),
-            Transform::from_xyz(world_x as f32, 0.0, world_z as f32),
-        ))
-        .id();
-
-    (entity, chunk)
 }
 
 fn mesh_chunks(
