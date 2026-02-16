@@ -1,3 +1,5 @@
+use bevy::camera::Exposure;
+use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::input::mouse::MouseMotion;
 use bevy::prelude::*;
 use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
@@ -22,7 +24,7 @@ impl Default for CameraPlugin {
     fn default() -> Self {
         Self {
             sensitivity: 0.0005,
-            speed: 200.0,
+            speed: 100.0,
             shift_speed: 1000.0,
             lock_cursor_on_start: true,
             starting_pos: Vec3::ZERO,
@@ -39,7 +41,7 @@ impl Plugin for CameraPlugin {
             starting_pos: self.starting_pos,
         });
         app.add_systems(Startup, spawn_camera)
-            .add_systems(Update, (camera_movement, camera_look));
+            .add_systems(Update, (camera_movement, camera_look, toggle_cursor));
 
         if self.lock_cursor_on_start {
             app.add_systems(Startup, lock_cursor);
@@ -52,6 +54,7 @@ pub struct CameraSettings {
     sensitivity: f32,
     speed: f32,
     shift_speed: f32,
+    can_move: bool,
 }
 
 fn spawn_camera(mut commands: Commands, config: Res<CameraConfig>) {
@@ -60,11 +63,23 @@ fn spawn_camera(mut commands: Commands, config: Res<CameraConfig>) {
 
     commands.spawn((
         Camera3d::default(),
+        Camera {
+            order: 0,
+            ..default()
+        },
+        Tonemapping::AcesFitted,
+        Exposure { ev100: 12. },
         transform,
+        AmbientLight {
+            color: Color::WHITE,
+            brightness: 3000.,
+            ..default()
+        },
         CameraSettings {
             sensitivity: config.sensitivity,
             speed: config.speed,
             shift_speed: config.shift_speed,
+            can_move: true,
         },
     ));
 }
@@ -74,8 +89,11 @@ fn camera_movement(
     keyboard: Res<ButtonInput<KeyCode>>,
     cam: Single<(&mut Transform, &CameraSettings), With<Camera3d>>,
 ) {
-    let mut direction = Vec3::ZERO;
     let (mut transform, settings) = cam.into_inner();
+    if !settings.can_move {
+        return;
+    }
+    let mut direction = Vec3::ZERO;
 
     if keyboard.pressed(KeyCode::KeyW) {
         direction += Vec3::from(transform.forward());
@@ -109,6 +127,10 @@ fn camera_look(
     camera: Single<(&mut Transform, &CameraSettings), With<Camera3d>>,
 ) {
     let (mut transform, settings) = camera.into_inner();
+    if !settings.can_move {
+        return;
+    }
+
     let mut delta = Vec2::ZERO;
 
     for ev in mouse_motion.read() {
@@ -138,4 +160,29 @@ fn lock_cursor(mut commands: Commands, window: Single<Entity, With<PrimaryWindow
         visible: false,
         ..default()
     });
+}
+
+fn toggle_cursor(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    window: Single<(Entity, &mut CursorOptions), With<PrimaryWindow>>,
+    mut camera: Single<&mut CameraSettings>,
+    mut commands: Commands,
+) {
+    if keyboard.just_pressed(KeyCode::Escape) {
+        let (entity, cursor) = window.into_inner();
+
+        let locked = cursor.grab_mode == CursorGrabMode::Locked;
+
+        camera.can_move = !locked;
+
+        commands.entity(entity).insert(CursorOptions {
+            grab_mode: if locked {
+                CursorGrabMode::None
+            } else {
+                CursorGrabMode::Locked
+            },
+            visible: locked,
+            ..default()
+        });
+    }
 }

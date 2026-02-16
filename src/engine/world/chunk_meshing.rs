@@ -1,5 +1,3 @@
-// understood
-
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 
@@ -46,7 +44,7 @@ impl BlockAccess for WorldBlockAccess<'_, '_> {
 impl Plugin for ChunkMeshingPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ChunkMap>();
-        app.insert_resource(ChunkMeshingBudget(64));
+        app.insert_resource(ChunkMeshingBudget(100));
 
         app.add_systems(Update, mesh_chunks.run_if(resource_exists::<BlockAtlas>));
     }

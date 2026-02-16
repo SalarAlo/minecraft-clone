@@ -1,14 +1,12 @@
-// understood
-
 use bevy::platform::collections::HashMap;
 use bevy::prelude::*;
 use noise::{Fbm, MultiFractal, NoiseFn, Perlin};
 use once_cell::sync::Lazy;
-use rand::rngs::StdRng;
-use rand::{RngExt, SeedableRng};
 
 use super::block::{BlockAccess, BlockType};
 use crate::engine::atlas::{ChunkMaterial, TextureAtlas};
+use crate::engine::world::biome::{BiomeKind, BiomeSelector};
+use crate::engine::world::climate_sampler::ClimateSampler;
 use crate::engine::{face_direction::DIRECTIONS, mesh_builder::MeshBuilder};
 
 pub const CHUNK_HEIGHT: usize = 128;
@@ -47,15 +45,8 @@ pub struct Chunk {
 #[derive(Resource, Default)]
 pub struct ChunkMap(pub HashMap<IVec2, Entity>);
 
+// Methods
 impl Chunk {
-    pub fn x(&self) -> i32 {
-        self.coord.x
-    }
-
-    pub fn z(&self) -> i32 {
-        self.coord.y
-    }
-
     pub fn build_chunk_mesh(&self, block_access: &impl BlockAccess, atlas: &TextureAtlas) -> Mesh {
         let mut mesh_builder = MeshBuilder::with_capacity_faces(CHUNK_VOLUME * 2);
         let origin = self.chunk_origin();
@@ -155,9 +146,13 @@ impl Chunk {
 
         mesh_builder.build_mesh()
     }
+}
 
+// Associated Functions
+impl Chunk {
     pub fn new(chunk_x: i32, chunk_z: i32) -> Chunk {
-        let mut rng: StdRng = StdRng::seed_from_u64(SEED as u64);
+        let selector = BiomeSelector::default();
+        let sampler = ClimateSampler::new();
         let scale = 0.02;
 
         let mut chunk = Chunk {
@@ -167,30 +162,35 @@ impl Chunk {
 
         for block_x in 0..CHUNK_SIZE as i32 {
             for block_z in 0..CHUNK_SIZE as i32 {
-                let world_x = (block_x + chunk_x * CHUNK_SIZE as i32) as f64 * scale;
-                let world_z = (block_z + chunk_z * CHUNK_SIZE as i32) as f64 * scale;
+                let world_x = block_x + chunk_x * CHUNK_SIZE as i32;
+                let world_z = block_z + chunk_z * CHUNK_SIZE as i32;
 
-                let height = FBM.get([world_x, world_z]);
+                let height = FBM.get([world_x as f64 * scale, world_z as f64 * scale]);
                 let height = ((HALF_CHUNK_HEIGHT as f64)
                     + ((height + 1.0) * 0.5 * (HALF_CHUNK_HEIGHT as f64)))
-                    as usize;
-                let height = height.clamp(0, CHUNK_HEIGHT - 1) as i32;
+                    as i32;
+
+                let climate_sample = sampler.sample(world_x, world_z);
+                let biome = selector.pick(&climate_sample);
+                let height =
+                    (biome.height_fn)(height, world_x as i32, world_z as i32, &climate_sample);
+
+                let height = height.clamp(0, (CHUNK_HEIGHT - 1) as i32) as i32;
 
                 for y in 0..height.max(WATER_HEIGHT as i32) {
-                    let block = if y == 0 {
-                        BlockType::Bedrock
-                    } else if y < WATER_HEIGHT as i32 {
+                    let block = if y < WATER_HEIGHT as i32 {
                         BlockType::Water
-                    } else if y < SAND_HEIGHT as i32 + rng.random_range(-1..=0) {
-                        BlockType::Sand
-                    } else if y < height - 1 {
-                        BlockType::Dirt
                     } else {
-                        if rng.random::<f32>() < 0.005 {
-                            chunk.place_tree(IVec3::new(block_x, height, block_z), &mut rng);
-                        }
+                        match biome.kind {
+                            BiomeKind::Plains => BlockType::Grass,
+                            BiomeKind::Desert => BlockType::Sand,
+                            BiomeKind::Tundra => BlockType::Snow,
+                            BiomeKind::Jungle => BlockType::Dirt,
 
-                        BlockType::Grass
+                            BiomeKind::Savanna => BlockType::Stone,
+                            BiomeKind::TemperateForest => BlockType::Stone,
+                            BiomeKind::BorealForest => BlockType::Snow,
+                        }
                     };
 
                     chunk.blocks[Self::to_index(IVec3::new(block_x, y, block_z))] = block;
@@ -215,65 +215,10 @@ impl Chunk {
             ))
             .id()
     }
+}
 
-    fn place_tree(&mut self, start_pos: IVec3, rng: &mut StdRng) {
-        const TREE_MIN_HEIGHT: i32 = 4;
-        const TREE_MAX_HEIGHT: i32 = 6;
-
-        let tree_height: i32 = rng.random_range(TREE_MIN_HEIGHT..=TREE_MAX_HEIGHT);
-
-        for y in 0..tree_height {
-            self.blocks[Self::to_index(start_pos + IVec3::new(0, y, 0))] = BlockType::OakWood;
-        }
-        let top = start_pos.y + tree_height;
-
-        // Bottom leaf layer (largest)
-        for x in -2..=2 {
-            for z in -2..=2 {
-                for y in -1..=0 {
-                    let pos = IVec3::new(start_pos.x + x, top + y, start_pos.z + z);
-
-                    if self.get_local(pos).is_none() {
-                        continue;
-                    }
-
-                    // Skip corners to avoid cube look
-                    if x.abs() == 2 && z.abs() == 2 {
-                        continue;
-                    }
-
-                    self.blocks[Self::to_index(pos)] = BlockType::OakLeaf;
-                }
-            }
-        }
-
-        // Middle layer
-        for x in -1..=1 {
-            for z in -1..=1 {
-                let pos = IVec3::new(start_pos.x + x, top + 1, start_pos.z + z);
-
-                if self.get_local(pos).is_none() {
-                    continue;
-                }
-
-                self.blocks[Self::to_index(pos)] = BlockType::OakLeaf;
-            }
-        }
-
-        // Top
-        let pos = IVec3::new(start_pos.x, top + 2, start_pos.z);
-        if self.get_local(pos).is_some() {
-            self.blocks[Self::to_index(pos)] = BlockType::OakLeaf;
-        }
-    }
-
-    #[inline(always)]
-    fn pad_index(x: i32, y: i32, z: i32) -> usize {
-        (x as usize)
-            + (z as usize) * PAD_CHUNK_SIZE
-            + (y as usize) * PAD_CHUNK_SIZE * PAD_CHUNK_SIZE
-    }
-
+// Helper Functions
+impl Chunk {
     #[inline(always)]
     fn to_index(v: IVec3) -> usize {
         v.y as usize + v.z as usize * CHUNK_HEIGHT + v.x as usize * CHUNK_HEIGHT * CHUNK_SIZE
@@ -298,5 +243,12 @@ impl Chunk {
             0,
             self.coord.y * CHUNK_SIZE as i32,
         )
+    }
+
+    #[inline(always)]
+    fn pad_index(x: i32, y: i32, z: i32) -> usize {
+        (x as usize)
+            + (z as usize) * PAD_CHUNK_SIZE
+            + (y as usize) * PAD_CHUNK_SIZE * PAD_CHUNK_SIZE
     }
 }

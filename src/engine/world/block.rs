@@ -1,5 +1,3 @@
-// understood
-
 use crate::engine::face_direction::FaceDirection;
 use bevy::math::IVec3;
 use strum::IntoEnumIterator;
@@ -53,8 +51,8 @@ impl BlockTextureId {
             BlockTextureId::OakWoodSide => "oak_log.png",
             BlockTextureId::OakWoodTop => "oak_log_top.png",
             BlockTextureId::Water => "water.png",
-            BlockTextureId::Snow => "stone.png",
-            BlockTextureId::Stone => "snow.png",
+            BlockTextureId::Snow => "snow.png",
+            BlockTextureId::Stone => "stone.png",
         });
 
         format!("{path}/{specific}")

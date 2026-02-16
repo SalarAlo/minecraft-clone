@@ -1,5 +1,3 @@
-// understood
-
 use crate::engine::atlas::BlockAtlas;
 use crate::engine::atlas::ChunkMaterial;
 use crate::engine::world::chunk::Chunk;

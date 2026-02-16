@@ -1,13 +1,13 @@
 use super::world::block::BlockTextureId;
+
+use std::collections::HashMap;
+
 use bevy::asset::RenderAssetUsages;
 use bevy::image::ImageSampler;
+use bevy::prelude::*;
 use bevy::render::render_resource::{
     AddressMode, Extent3d, FilterMode, SamplerDescriptor, TextureDimension, TextureFormat,
 };
-
-use bevy::prelude::*;
-
-use std::collections::HashMap;
 
 pub const TILE_SIZE: u32 = 16;
 
@@ -125,7 +125,7 @@ pub fn try_build_atlas(
     commands.insert_resource(ChunkMaterial(material));
 
     commands.remove_resource::<PendingBlockTextures>();
-    println!("atlas built!");
+    info!("atlas built!");
 }
 
 fn build_atlas(

@@ -1,5 +1,3 @@
-// understood
-
 use bevy::prelude::*;
 
 #[derive(Copy, Clone, Debug)]
@@ -65,8 +63,6 @@ pub const FACE_VERTICES: [[[f32; 3]; 4]; 6] = [
         [0.5, 0.5, -0.5],
     ],
 ];
-
-pub const FACE_INDICES: [u32; 6] = [0, 1, 2, 0, 2, 3];
 
 pub const DIRECTIONS: [FaceDirection; 6] = [
     FaceDirection::Top,
