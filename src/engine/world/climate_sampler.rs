@@ -29,7 +29,7 @@ impl ClimateSampler {
                 .set_lacunarity(1.4)
                 .set_persistence(0.8),
 
-            scale: 0.005,
+            scale: 0.002,
         }
     }
 }

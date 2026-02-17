@@ -5,30 +5,25 @@ use once_cell::sync::Lazy;
 
 use super::block::{BlockAccess, BlockType};
 use crate::engine::atlas::{ChunkMaterial, TextureAtlas};
-use crate::engine::world::biome::{BiomeKind, BiomeSelector};
+use crate::engine::world::biome::BiomeSelector;
 use crate::engine::world::climate_sampler::ClimateSampler;
 use crate::engine::{face_direction::DIRECTIONS, mesh_builder::MeshBuilder};
 
 pub const CHUNK_HEIGHT: usize = 128;
 const HALF_CHUNK_HEIGHT: usize = CHUNK_HEIGHT / 2;
 pub const WATER_HEIGHT: usize = HALF_CHUNK_HEIGHT + 20;
-pub const SAND_HEIGHT: usize = HALF_CHUNK_HEIGHT + 22;
 pub const CHUNK_SIZE: usize = 16;
 const CHUNK_VOLUME: usize = CHUNK_SIZE * CHUNK_SIZE * CHUNK_HEIGHT;
 
-// 2 are added because -> neighbour chunk_data neighbour
 const PAD_CHUNK_SIZE: usize = CHUNK_SIZE + 2;
 
-//                        neighbour
-// 2 are added because -> chunk_data
-//                        neighbour
 const PAD_CHUNK_HEIGHT: usize = CHUNK_HEIGHT + 2;
 
 const PAD_CHUNK_VOLUME: usize = PAD_CHUNK_SIZE * PAD_CHUNK_SIZE * PAD_CHUNK_HEIGHT;
 
 const SEED: u32 = 42;
 
-static FBM: Lazy<Fbm<Perlin>> = Lazy::new(|| {
+pub static FBM: Lazy<Fbm<Perlin>> = Lazy::new(|| {
     Fbm::<Perlin>::new(SEED)
         .set_frequency(0.5)
         .set_octaves(2)
@@ -119,7 +114,6 @@ impl Chunk {
                         continue;
                     }
 
-                    // the actual non padded block position
                     let bx = px - 1;
                     let by = py - 1;
                     let bz = pz - 1;
@@ -153,7 +147,7 @@ impl Chunk {
     pub fn new(chunk_x: i32, chunk_z: i32) -> Chunk {
         let selector = BiomeSelector::default();
         let sampler = ClimateSampler::new();
-        let scale = 0.02;
+        let scale = 0.01;
 
         let mut chunk = Chunk {
             coord: IVec2::new(chunk_x, chunk_z),
@@ -172,25 +166,22 @@ impl Chunk {
 
                 let climate_sample = sampler.sample(world_x, world_z);
                 let biome = selector.pick(&climate_sample);
-                let height =
-                    (biome.height_fn)(height, world_x as i32, world_z as i32, &climate_sample);
+                let height = selector.blended_height(
+                    height,
+                    world_x as i32,
+                    world_z as i32,
+                    &climate_sample,
+                );
 
                 let height = height.clamp(0, (CHUNK_HEIGHT - 1) as i32) as i32;
 
                 for y in 0..height.max(WATER_HEIGHT as i32) {
-                    let block = if y < WATER_HEIGHT as i32 {
+                    let block = if y == 0 {
+                        BlockType::Bedrock
+                    } else if y < WATER_HEIGHT as i32 {
                         BlockType::Water
                     } else {
-                        match biome.kind {
-                            BiomeKind::Plains => BlockType::Grass,
-                            BiomeKind::Desert => BlockType::Sand,
-                            BiomeKind::Tundra => BlockType::Snow,
-                            BiomeKind::Jungle => BlockType::Dirt,
-
-                            BiomeKind::Savanna => BlockType::Stone,
-                            BiomeKind::TemperateForest => BlockType::Stone,
-                            BiomeKind::BorealForest => BlockType::Snow,
-                        }
+                        biome.ground_block()
                     };
 
                     chunk.blocks[Self::to_index(IVec3::new(block_x, y, block_z))] = block;
