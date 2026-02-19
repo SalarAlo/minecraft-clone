@@ -94,6 +94,10 @@ impl BlockType {
     }
 }
 
-pub trait BlockAccess {
+pub trait BlockRead {
     fn get_block(&self, world_pos: IVec3) -> Option<BlockType>;
+}
+
+pub trait BlockWrite {
+    fn set_block(&mut self, world_pos: IVec3, block_type: BlockType);
 }

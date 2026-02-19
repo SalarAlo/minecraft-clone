@@ -8,8 +8,14 @@ use crate::engine::atlas::BlockAtlas;
 
 // reusable access pattern for ecs bevy data
 #[derive(SystemParam)]
-pub struct WorldBlockAccess<'w, 's> {
+pub struct WorldBlockReadAccess<'w, 's> {
     chunks: Query<'w, 's, &'static Chunk>,
+    map: Res<'w, ChunkMap>,
+}
+
+#[derive(SystemParam)]
+pub struct WorldBlockWriteAccess<'w, 's> {
+    chunks: Query<'w, 's, &'static mut Chunk>,
     map: Res<'w, ChunkMap>,
 }
 
@@ -21,7 +27,7 @@ pub struct UnmeshedChunk;
 #[derive(Resource, Default)]
 pub struct ChunkMeshingBudget(usize);
 
-impl BlockAccess for WorldBlockAccess<'_, '_> {
+impl BlockRead for WorldBlockReadAccess<'_, '_> {
     fn get_block(&self, world: IVec3) -> Option<BlockType> {
         let chunk_coord = IVec2::new(
             world.x.div_euclid(CHUNK_SIZE as i32),
@@ -41,6 +47,27 @@ impl BlockAccess for WorldBlockAccess<'_, '_> {
     }
 }
 
+impl BlockWrite for WorldBlockWriteAccess<'_, '_> {
+    fn set_block(&mut self, world: IVec3, block_type: BlockType) {
+        let chunk_coord = IVec2::new(
+            world.x.div_euclid(CHUNK_SIZE as i32),
+            world.z.div_euclid(CHUNK_SIZE as i32),
+        );
+
+        let local = IVec3::new(
+            world.x.rem_euclid(CHUNK_SIZE as i32),
+            world.y,
+            world.z.rem_euclid(CHUNK_SIZE as i32),
+        );
+
+        if let Some(entity) = self.map.0.get(&chunk_coord) {
+            if let Ok(mut chunk) = self.chunks.get_mut(*entity) {
+                chunk.blocks[Chunk::to_index(local)] = block_type;
+            }
+        }
+    }
+}
+
 impl Plugin for ChunkMeshingPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ChunkMap>();
@@ -52,7 +79,7 @@ impl Plugin for ChunkMeshingPlugin {
 
 fn mesh_chunks(
     mut commands: Commands,
-    access: WorldBlockAccess,
+    access: WorldBlockReadAccess,
     atlas: Res<BlockAtlas>,
     mut mesh_assets: ResMut<Assets<Mesh>>,
     query: Query<(Entity, &Chunk), (Without<Mesh3d>, Without<UnmeshedChunk>)>,

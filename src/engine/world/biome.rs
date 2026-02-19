@@ -1,4 +1,5 @@
 use crate::engine::world::block::BlockType;
+use crate::engine::world::structure::StructureRule;
 
 use super::biomes::desert::Desert;
 use super::biomes::jungle::Jungle;
@@ -19,6 +20,10 @@ pub trait Biome {
     fn get_surface(&self) -> SurfaceRules;
     fn height_offset(&self, x: i32, z: i32, climate: &ClimateSample) -> f64;
     fn ground_block(&self) -> BlockType;
+
+    fn structures(&self) -> &[StructureRule] {
+        &[]
+    }
 }
 
 pub struct BiomeSelector {
@@ -60,23 +65,23 @@ impl BiomeSelector {
     pub fn blended_height(&self, base: i32, x: i32, z: i32, climate: &ClimateSample) -> i32 {
         const SHARPNESS: f64 = 2.5;
         const EPSILON: f64 = 0.0001;
+        const BASE_STRENGTH: f64 = 1.0; // tune this
 
-        let mut total_weight = 0.0;
-        let mut total_offset = 0.0;
+        let mut total_weight = BASE_STRENGTH;
+        let mut total_value = BASE_STRENGTH * base as f64;
 
         for biome in &self.biomes {
             let surface = biome.get_surface();
             let delta = surface.compute_delta(climate).max(EPSILON);
 
             let weight = 1.0 / delta.powf(SHARPNESS);
+            let value = base as f64 + biome.height_offset(x, z, climate) as f64;
 
             total_weight += weight;
-            total_offset += weight * biome.height_offset(x, z, climate);
+            total_value += weight * value;
         }
 
-        let blended = total_offset / total_weight;
-
-        base + blended as i32
+        (total_value / total_weight) as i32
     }
 }
 

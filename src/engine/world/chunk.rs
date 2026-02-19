@@ -3,15 +3,16 @@ use bevy::prelude::*;
 use noise::{Fbm, MultiFractal, NoiseFn, Perlin};
 use once_cell::sync::Lazy;
 
-use super::block::{BlockAccess, BlockType};
+use super::block::{BlockRead, BlockType};
 use crate::engine::atlas::{ChunkMaterial, TextureAtlas};
 use crate::engine::world::biome::BiomeSelector;
+use crate::engine::world::block::BlockWrite;
 use crate::engine::world::climate_sampler::ClimateSampler;
 use crate::engine::{face_direction::DIRECTIONS, mesh_builder::MeshBuilder};
 
 pub const CHUNK_HEIGHT: usize = 128;
 const HALF_CHUNK_HEIGHT: usize = CHUNK_HEIGHT / 2;
-pub const WATER_HEIGHT: usize = HALF_CHUNK_HEIGHT + 20;
+pub const WATER_HEIGHT: usize = HALF_CHUNK_HEIGHT - 20;
 pub const CHUNK_SIZE: usize = 16;
 const CHUNK_VOLUME: usize = CHUNK_SIZE * CHUNK_SIZE * CHUNK_HEIGHT;
 
@@ -33,8 +34,9 @@ pub static FBM: Lazy<Fbm<Perlin>> = Lazy::new(|| {
 
 #[derive(Component, Clone)]
 pub struct Chunk {
-    coord: IVec2,
-    blocks: [BlockType; CHUNK_VOLUME],
+    pub coord: IVec2,
+    pub blocks: [BlockType; CHUNK_VOLUME],
+    pub surface: [i32; CHUNK_SIZE * CHUNK_SIZE],
 }
 
 #[derive(Resource, Default)]
@@ -42,7 +44,33 @@ pub struct ChunkMap(pub HashMap<IVec2, Entity>);
 
 // Methods
 impl Chunk {
-    pub fn build_chunk_mesh(&self, block_access: &impl BlockAccess, atlas: &TextureAtlas) -> Mesh {
+    pub fn apply_structures(
+        &mut self,
+        world_origin: IVec2,
+        biome_selector: &BiomeSelector,
+        sampler: &ClimateSampler,
+        world: &mut dyn BlockWrite,
+    ) {
+        for lx in 0..CHUNK_SIZE as i32 {
+            for lz in 0..CHUNK_SIZE as i32 {
+                let surface_y = self.surface[lx as usize + lz as usize * CHUNK_SIZE];
+
+                let world_x = world_origin.x + lx;
+                let world_z = world_origin.y + lz;
+
+                let climate = sampler.sample(world_x, world_z);
+                let biome = biome_selector.pick(&climate);
+
+                let pos = IVec3::new(world_x, surface_y, world_z);
+
+                for structure in biome.structures() {
+                    structure.try_place(pos, world, SEED);
+                }
+            }
+        }
+    }
+
+    pub fn build_chunk_mesh(&self, block_access: &impl BlockRead, atlas: &TextureAtlas) -> Mesh {
         let mut mesh_builder = MeshBuilder::with_capacity_faces(CHUNK_VOLUME * 2);
         let origin = self.chunk_origin();
 
@@ -152,6 +180,7 @@ impl Chunk {
         let mut chunk = Chunk {
             coord: IVec2::new(chunk_x, chunk_z),
             blocks: [BlockType::Air; CHUNK_VOLUME],
+            surface: [0; CHUNK_SIZE * CHUNK_SIZE],
         };
 
         for block_x in 0..CHUNK_SIZE as i32 {
@@ -160,9 +189,8 @@ impl Chunk {
                 let world_z = block_z + chunk_z * CHUNK_SIZE as i32;
 
                 let height = FBM.get([world_x as f64 * scale, world_z as f64 * scale]);
-                let height = ((HALF_CHUNK_HEIGHT as f64)
-                    + ((height + 1.0) * 0.5 * (HALF_CHUNK_HEIGHT as f64)))
-                    as i32;
+                let height = (height + 1.0) * 0.5;
+                let height = (height * (CHUNK_HEIGHT as f64)) as i32;
 
                 let climate_sample = sampler.sample(world_x, world_z);
                 let biome = selector.pick(&climate_sample);
@@ -179,8 +207,11 @@ impl Chunk {
                     let block = if y == 0 {
                         BlockType::Bedrock
                     } else if y < WATER_HEIGHT as i32 {
+                        chunk.surface[(block_x as usize) + (block_z as usize) * CHUNK_SIZE] = -1;
                         BlockType::Water
                     } else {
+                        chunk.surface[(block_x as usize) + (block_z as usize) * CHUNK_SIZE] =
+                            height;
                         biome.ground_block()
                     };
 
@@ -211,7 +242,7 @@ impl Chunk {
 // Helper Functions
 impl Chunk {
     #[inline(always)]
-    fn to_index(v: IVec3) -> usize {
+    pub fn to_index(v: IVec3) -> usize {
         v.y as usize + v.z as usize * CHUNK_HEIGHT + v.x as usize * CHUNK_HEIGHT * CHUNK_SIZE
     }
 
